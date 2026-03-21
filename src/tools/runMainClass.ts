@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { detectBuildTool, getRunMainClassCommand } from "../utils/buildTool.js";
 import { execute, formatResultCompact } from "../utils/executor.js";
+import { resolveProjectPath, resolveJavaHome, resolveTimeout } from "../utils/env.js";
 
 export function registerRunMainClassTool(server: McpServer): void {
   server.registerTool(
@@ -11,7 +12,10 @@ export function registerRunMainClassTool(server: McpServer): void {
       description:
         "Execute a Java class with a main() method via Maven exec:java or Gradle run. Returns stdout/stderr, exit code, and elapsed time.",
       inputSchema: {
-        projectPath: z.string().describe("Absolute path to the Java project root"),
+        projectPath: z
+          .string()
+          .optional()
+          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
         mainClass: z
           .string()
           .describe("Fully qualified class name (e.g. smoke.ContractRuleSmokeTest)"),
@@ -34,7 +38,15 @@ export function registerRunMainClassTool(server: McpServer): void {
       },
     },
     async ({ projectPath, mainClass, classpathScope, javaHome, args, timeout }) => {
-      const buildInfo = detectBuildTool(projectPath);
+      const resolvedPath = resolveProjectPath(projectPath);
+      if (!resolvedPath) {
+        return {
+          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
+          isError: true,
+        };
+      }
+
+      const buildInfo = detectBuildTool(resolvedPath);
       const command = getRunMainClassCommand(
         buildInfo,
         mainClass,
@@ -43,12 +55,13 @@ export function registerRunMainClassTool(server: McpServer): void {
       );
 
       const env: Record<string, string> = {};
-      if (javaHome) env["JAVA_HOME"] = javaHome;
+      const resolvedJavaHome = resolveJavaHome(javaHome);
+      if (resolvedJavaHome) env["JAVA_HOME"] = resolvedJavaHome;
 
       const result = await execute(command, {
-        cwd: projectPath,
+        cwd: resolvedPath,
         env,
-        timeoutMs: timeout,
+        timeoutMs: resolveTimeout(timeout),
       });
       const text = formatResultCompact(result, `Main: ${mainClass}`, 80);
 

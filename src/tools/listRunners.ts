@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { glob } from "glob";
 import { readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { resolveProjectPath, resolveTestBaseDir } from "../utils/env.js";
 
 export function registerListRunnersTool(server: McpServer): void {
   server.registerTool(
@@ -12,7 +13,10 @@ export function registerListRunnersTool(server: McpServer): void {
       description:
         "Discover Cucumber/JUnit runner classes in a Java project by scanning for @Suite, @RunWith, @SelectPackages annotations.",
       inputSchema: {
-        projectPath: z.string().describe("Absolute path to the Java project root"),
+        projectPath: z
+          .string()
+          .optional()
+          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
         baseDir: z
           .string()
           .optional()
@@ -20,7 +24,16 @@ export function registerListRunnersTool(server: McpServer): void {
       },
     },
     async ({ projectPath, baseDir }) => {
-      const scanDir = join(projectPath, baseDir ?? "src/test/java");
+      const resolvedPath = resolveProjectPath(projectPath);
+      if (!resolvedPath) {
+        return {
+          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
+          isError: true,
+        };
+      }
+
+      const resolvedBaseDir = resolveTestBaseDir(baseDir);
+      const scanDir = join(resolvedPath, resolvedBaseDir);
       const pattern = "**/*.java";
       const files = await glob(pattern, { cwd: scanDir, absolute: true });
 
@@ -41,7 +54,7 @@ export function registerListRunnersTool(server: McpServer): void {
             .replace(/\.java$/, "")
             .split(sep)
             .join(".");
-          runners.push({ path: relative(projectPath, file), fqcn });
+          runners.push({ path: relative(resolvedPath, file), fqcn });
         }
       }
 

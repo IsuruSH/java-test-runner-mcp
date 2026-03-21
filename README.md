@@ -41,7 +41,11 @@ No installation needed. Add to your Cursor MCP configuration:
   "mcpServers": {
     "java-test-runner": {
       "command": "npx",
-      "args": ["-y", "java-test-runner-mcp"]
+      "args": ["-y", "java-test-runner-mcp"],
+      "env": {
+        "PROJECT_PATH": "C:\\Repos\\my-java-project",
+        "JAVA_HOME": "C:\\Program Files\\Java\\jdk-17"
+      }
     }
   }
 }
@@ -54,7 +58,12 @@ No installation needed. Add to your Cursor MCP configuration:
   "mcpServers": {
     "java-test-runner": {
       "command": "npx",
-      "args": ["-y", "java-test-runner-mcp"]
+      "args": ["-y", "java-test-runner-mcp"],
+      "env": {
+        "PROJECT_PATH": "C:\\Repos\\my-java-project",
+        "JAVA_HOME": "C:\\Program Files\\Java\\jdk-17",
+        "TIMEOUT_MS": "600000"
+      }
     }
   }
 }
@@ -69,7 +78,10 @@ If you've cloned and built this repo locally, point directly to the built entry 
   "mcpServers": {
     "java-test-runner": {
       "command": "node",
-      "args": ["C:\\Repos\\java-test-runner-mcp\\build\\index.js"]
+      "args": ["C:\\Repos\\java-test-runner-mcp\\build\\index.js"],
+      "env": {
+        "PROJECT_PATH": "C:\\Repos\\my-java-project"
+      }
     }
   }
 }
@@ -84,7 +96,11 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
   "mcpServers": {
     "java-test-runner": {
       "command": "npx",
-      "args": ["-y", "java-test-runner-mcp"]
+      "args": ["-y", "java-test-runner-mcp"],
+      "env": {
+        "PROJECT_PATH": "/Users/me/repos/my-java-project",
+        "JAVA_HOME": "/usr/lib/jvm/java-17"
+      }
     }
   }
 }
@@ -264,6 +280,42 @@ Discovery tools for finding runner and test classes.
 | `projectPath` | Yes | Absolute path to project root |
 | `pattern` | No | Glob pattern (list_test_classes only) |
 | `baseDir` | No | Scan directory relative to project root |
+
+## Environment Variables
+
+Configure these in the `env` block of your `mcp.json` to eliminate repetitive parameters and prevent agent confusion. All are optional -- tool parameters always take precedence over env vars.
+
+| Variable | Description | Example |
+|---|---|---|
+| `PROJECT_PATH` | Default Java project root path. When set, all tools use this automatically so the agent doesn't need to guess or ask for the path. | `C:\Repos\my-java-project` |
+| `JAVA_HOME` | Java installation path. Passed to all build/test commands. Prevents agents from guessing JDK locations. | `C:\Program Files\Java\jdk-17` |
+| `TIMEOUT_MS` | Default timeout in milliseconds for all execution tools (compile, test, run). | `600000` (10 min) |
+| `BUILD_TOOL` | Force `maven` or `gradle` instead of auto-detection. Useful when a project has both `pom.xml` and `build.gradle`, or when auto-detection picks the wrong one. | `maven` |
+| `TEST_BASE_DIR` | Default directory for test class/runner scanning, relative to project root. | `src/test/java` |
+| `MAVEN_PROFILES` | Comma-separated Maven profiles to activate by default on compile. | `dev,integration` |
+
+**Full example (`mcp.json`):**
+
+```json
+{
+  "mcpServers": {
+    "java-test-runner": {
+      "command": "npx",
+      "args": ["-y", "java-test-runner-mcp"],
+      "env": {
+        "PROJECT_PATH": "C:\\Repos\\my-java-project",
+        "JAVA_HOME": "C:\\Program Files\\Java\\jdk-17",
+        "TIMEOUT_MS": "600000",
+        "BUILD_TOOL": "maven",
+        "TEST_BASE_DIR": "src/test/java",
+        "MAVEN_PROFILES": "dev"
+      }
+    }
+  }
+}
+```
+
+**How it helps agents:** When `PROJECT_PATH` and `JAVA_HOME` are set, agents can call tools like `compile`, `run_test`, and `list_runners` without needing to figure out absolute paths -- the most common source of agent errors.
 
 ## Requirements
 

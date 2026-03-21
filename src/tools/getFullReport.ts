@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { detectBuildTool, getTestReportDir } from "../utils/buildTool.js";
 import { getScenarioOutput } from "../utils/xmlParser.js";
+import { resolveProjectPath } from "../utils/env.js";
 
 export function registerGetFullReportTool(server: McpServer): void {
   server.registerTool(
@@ -15,7 +16,10 @@ export function registerGetFullReportTool(server: McpServer): void {
         'Use source="scenario" to retrieve the complete, uncapped Cucumber step log (API requests/responses, DataTables, stack traces) for a specific scenario or all failed scenarios. ' +
         'Use source="build_log" to retrieve the full Maven/Gradle console output from the most recent run_test execution.',
       inputSchema: {
-        projectPath: z.string().describe("Absolute path to the Java project root"),
+        projectPath: z
+          .string()
+          .optional()
+          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
         source: z
           .enum(["scenario", "build_log"])
           .default("scenario")
@@ -31,10 +35,18 @@ export function registerGetFullReportTool(server: McpServer): void {
       },
     },
     async ({ projectPath, source, scenarioName, maxLines }) => {
-      if (source === "build_log") {
-        return buildLogMode(projectPath, maxLines ?? 500);
+      const resolvedPath = resolveProjectPath(projectPath);
+      if (!resolvedPath) {
+        return {
+          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
+          isError: true,
+        };
       }
-      return scenarioMode(projectPath, scenarioName);
+
+      if (source === "build_log") {
+        return buildLogMode(resolvedPath, maxLines ?? 500);
+      }
+      return scenarioMode(resolvedPath, scenarioName);
     },
   );
 }

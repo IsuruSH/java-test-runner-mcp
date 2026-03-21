@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { XMLParser } from "fast-xml-parser";
 import { detectBuildTool } from "../utils/buildTool.js";
+import { resolveProjectPath } from "../utils/env.js";
 
 interface BuildInfoResult {
   buildTool: string;
@@ -23,17 +24,28 @@ export function registerGetBuildInfoTool(server: McpServer): void {
       description:
         "Read project metadata from pom.xml or build.gradle. Returns build tool, groupId, artifactId, version, Java version, and packaging type.",
       inputSchema: {
-        projectPath: z.string().describe("Absolute path to the Java project root"),
+        projectPath: z
+          .string()
+          .optional()
+          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
       },
     },
     async ({ projectPath }) => {
-      const buildInfo = detectBuildTool(projectPath);
+      const resolvedPath = resolveProjectPath(projectPath);
+      if (!resolvedPath) {
+        return {
+          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
+          isError: true,
+        };
+      }
+
+      const buildInfo = detectBuildTool(resolvedPath);
       let result: BuildInfoResult;
 
       if (buildInfo.type === "maven") {
-        result = parseMavenPom(projectPath);
+        result = parseMavenPom(resolvedPath);
       } else {
-        result = parseGradleBuild(projectPath);
+        result = parseGradleBuild(resolvedPath);
       }
 
       const lines: string[] = [];

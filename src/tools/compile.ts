@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { detectBuildTool, getCompileCommand } from "../utils/buildTool.js";
 import { execute, formatResultCompact } from "../utils/executor.js";
+import { resolveProjectPath, resolveJavaHome, resolveTimeout, resolveMavenProfiles } from "../utils/env.js";
 
 export function registerCompileTool(server: McpServer): void {
   server.registerTool(
@@ -11,7 +12,10 @@ export function registerCompileTool(server: McpServer): void {
       description:
         "Compile a Maven or Gradle Java project. Auto-detects the build tool from the project root. Returns stdout/stderr, exit code, and elapsed time.",
       inputSchema: {
-        projectPath: z.string().describe("Absolute path to the Java project root"),
+        projectPath: z
+          .string()
+          .optional()
+          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
         javaHome: z
           .string()
           .optional()
@@ -27,14 +31,28 @@ export function registerCompileTool(server: McpServer): void {
       },
     },
     async ({ projectPath, javaHome, profiles, args }) => {
-      const buildInfo = detectBuildTool(projectPath);
-      const command = getCompileCommand(buildInfo, profiles);
+      const resolvedPath = resolveProjectPath(projectPath);
+      if (!resolvedPath) {
+        return {
+          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
+          isError: true,
+        };
+      }
+
+      const buildInfo = detectBuildTool(resolvedPath);
+      const resolvedProfiles = resolveMavenProfiles(profiles);
+      const command = getCompileCommand(buildInfo, resolvedProfiles);
       if (args) command.push(...args);
 
       const env: Record<string, string> = {};
-      if (javaHome) env["JAVA_HOME"] = javaHome;
+      const resolvedJavaHome = resolveJavaHome(javaHome);
+      if (resolvedJavaHome) env["JAVA_HOME"] = resolvedJavaHome;
 
-      const result = await execute(command, { cwd: projectPath, env });
+      const result = await execute(command, {
+        cwd: resolvedPath,
+        env,
+        timeoutMs: resolveTimeout(),
+      });
       const text = formatResultCompact(result, `Compile (${buildInfo.type})`, 40);
 
       return {

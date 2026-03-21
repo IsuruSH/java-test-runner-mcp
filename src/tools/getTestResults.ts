@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { detectBuildTool, getTestReportDir } from "../utils/buildTool.js";
 import { parseTestReports, type TestReport } from "../utils/xmlParser.js";
+import { resolveProjectPath } from "../utils/env.js";
 
 export function registerGetTestResultsTool(server: McpServer): void {
   server.registerTool(
@@ -11,7 +12,10 @@ export function registerGetTestResultsTool(server: McpServer): void {
       description:
         "Parse Surefire/Gradle XML test reports and return structured results with per-test metrics (name, class, time, status, failure message).",
       inputSchema: {
-        projectPath: z.string().describe("Absolute path to the Java project root"),
+        projectPath: z
+          .string()
+          .optional()
+          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
         reportDir: z
           .string()
           .optional()
@@ -40,8 +44,16 @@ export function registerGetTestResultsTool(server: McpServer): void {
       }),
     },
     async ({ projectPath, reportDir }) => {
-      const buildInfo = detectBuildTool(projectPath);
-      const dir = reportDir ?? getTestReportDir(buildInfo, projectPath);
+      const resolvedPath = resolveProjectPath(projectPath);
+      if (!resolvedPath) {
+        return {
+          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
+          isError: true,
+        };
+      }
+
+      const buildInfo = detectBuildTool(resolvedPath);
+      const dir = reportDir ?? getTestReportDir(buildInfo, resolvedPath);
       const report: TestReport = parseTestReports(dir);
 
       const textSummary = formatTextSummary(report);

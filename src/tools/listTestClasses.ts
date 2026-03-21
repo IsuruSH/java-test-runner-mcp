@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { glob } from "glob";
 import { join, relative, sep } from "node:path";
+import { resolveProjectPath, resolveTestBaseDir } from "../utils/env.js";
 
 export function registerListTestClassesTool(server: McpServer): void {
   server.registerTool(
@@ -11,7 +12,10 @@ export function registerListTestClassesTool(server: McpServer): void {
       description:
         "Discover test classes in a Java project by glob pattern. Returns file paths and fully qualified class names.",
       inputSchema: {
-        projectPath: z.string().describe("Absolute path to the Java project root"),
+        projectPath: z
+          .string()
+          .optional()
+          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
         pattern: z
           .string()
           .optional()
@@ -23,7 +27,16 @@ export function registerListTestClassesTool(server: McpServer): void {
       },
     },
     async ({ projectPath, pattern, baseDir }) => {
-      const scanDir = join(projectPath, baseDir ?? "src/test/java");
+      const resolvedPath = resolveProjectPath(projectPath);
+      if (!resolvedPath) {
+        return {
+          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
+          isError: true,
+        };
+      }
+
+      const resolvedBaseDir = resolveTestBaseDir(baseDir);
+      const scanDir = join(resolvedPath, resolvedBaseDir);
       const globPattern = pattern ?? "**/*Test*.java";
       const files = await glob(globPattern, { cwd: scanDir, absolute: false });
 
@@ -32,7 +45,7 @@ export function registerListTestClassesTool(server: McpServer): void {
           content: [
             {
               type: "text" as const,
-              text: `No test classes found matching '${globPattern}' in ${relative(projectPath, scanDir) || "."}`,
+              text: `No test classes found matching '${globPattern}' in ${relative(resolvedPath, scanDir) || "."}`,
             },
           ],
         };
@@ -43,7 +56,7 @@ export function registerListTestClassesTool(server: McpServer): void {
           .replace(/\.java$/, "")
           .split(/[/\\]/)
           .join(".");
-        return { path: join(baseDir ?? "src/test/java", f), fqcn };
+        return { path: join(resolvedBaseDir, f), fqcn };
       });
 
       const lines = entries.map((e) => `${e.fqcn}  (${e.path})`);

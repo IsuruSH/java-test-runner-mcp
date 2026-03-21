@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { getEnvConfig } from "./env.js";
 
 export type BuildToolType = "maven" | "gradle";
 
@@ -12,12 +13,33 @@ export interface BuildToolInfo {
 /**
  * Detects whether a project uses Maven or Gradle by checking for
  * wrapper scripts and build files. Prefers wrappers over system-installed commands.
+ * If the BUILD_TOOL env var is set, it forces that build tool type.
  */
 export function detectBuildTool(projectPath: string): BuildToolInfo {
   const isWindows = process.platform === "win32";
+  const envConfig = getEnvConfig();
 
   const mvnWrapper = join(projectPath, isWindows ? "mvnw.cmd" : "mvnw");
   const gradleWrapper = join(projectPath, isWindows ? "gradlew.bat" : "gradlew");
+
+  if (envConfig.buildTool === "gradle") {
+    const wrapperExists = existsSync(gradleWrapper);
+    return {
+      type: "gradle",
+      executable: wrapperExists ? gradleWrapper : "gradle",
+      wrapperPath: wrapperExists ? gradleWrapper : null,
+    };
+  }
+
+  if (envConfig.buildTool === "maven") {
+    const wrapperExists = existsSync(mvnWrapper);
+    return {
+      type: "maven",
+      executable: wrapperExists ? mvnWrapper : "mvn",
+      wrapperPath: wrapperExists ? mvnWrapper : null,
+    };
+  }
+
   const pomXml = join(projectPath, "pom.xml");
   const buildGradle = join(projectPath, "build.gradle");
   const buildGradleKts = join(projectPath, "build.gradle.kts");

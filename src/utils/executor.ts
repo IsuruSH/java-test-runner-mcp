@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
+import { getEnvConfig } from "./env.js";
 
 export interface ExecutionResult {
   stdout: string;
@@ -20,6 +21,10 @@ export interface ExecutionOptions {
 const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes
 const DEFAULT_MAX_OUTPUT = 512 * 1024; // 512 KB
 
+function getDefaultTimeout(): number {
+  return getEnvConfig().timeoutMs ?? DEFAULT_TIMEOUT_MS;
+}
+
 /**
  * Spawn a child process, capture stdout/stderr, enforce a timeout,
  * and return structured results with elapsed time.
@@ -31,7 +36,7 @@ export function execute(
   const {
     cwd,
     env,
-    timeoutMs = DEFAULT_TIMEOUT_MS,
+    timeoutMs = getDefaultTimeout(),
     maxOutputBytes = DEFAULT_MAX_OUTPUT,
   } = options;
 

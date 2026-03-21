@@ -5,6 +5,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { detectBuildTool, getTestCommand, getTestReportDir } from "../utils/buildTool.js";
 import { execute, formatResultCompact } from "../utils/executor.js";
 import { parseTestReports } from "../utils/xmlParser.js";
+import { resolveProjectPath, resolveJavaHome, resolveTimeout } from "../utils/env.js";
 
 export function registerRunTestTool(server: McpServer): void {
   server.registerTool(
@@ -14,7 +15,10 @@ export function registerRunTestTool(server: McpServer): void {
       description:
         "Run a specific test or runner class in a Maven/Gradle project. Returns a structured summary with test results. For failed tests, includes the full scenario output (API responses, DataTables, stack traces) so the agent can debug without reading external files.",
       inputSchema: {
-        projectPath: z.string().describe("Absolute path to the Java project root"),
+        projectPath: z
+          .string()
+          .optional()
+          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
         testClass: z
           .string()
           .describe("Fully qualified class name (e.g. runner.WpandTaskStatusRemapping)"),
@@ -33,19 +37,28 @@ export function registerRunTestTool(server: McpServer): void {
       },
     },
     async ({ projectPath, testClass, javaHome, jvmArgs, timeout }) => {
-      const buildInfo = detectBuildTool(projectPath);
+      const resolvedPath = resolveProjectPath(projectPath);
+      if (!resolvedPath) {
+        return {
+          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
+          isError: true,
+        };
+      }
+
+      const buildInfo = detectBuildTool(resolvedPath);
       const command = getTestCommand(buildInfo, testClass, jvmArgs);
 
       const env: Record<string, string> = {};
-      if (javaHome) env["JAVA_HOME"] = javaHome;
+      const resolvedJavaHome = resolveJavaHome(javaHome);
+      if (resolvedJavaHome) env["JAVA_HOME"] = resolvedJavaHome;
 
       const result = await execute(command, {
-        cwd: projectPath,
+        cwd: resolvedPath,
         env,
-        timeoutMs: timeout,
+        timeoutMs: resolveTimeout(timeout),
       });
 
-      const logDir = join(projectPath, ".java-test-runner");
+      const logDir = join(resolvedPath, ".java-test-runner");
       mkdirSync(logDir, { recursive: true });
       writeFileSync(
         join(logDir, "last-run.log"),
@@ -53,7 +66,7 @@ export function registerRunTestTool(server: McpServer): void {
         "utf-8",
       );
 
-      const reportDir = getTestReportDir(buildInfo, projectPath);
+      const reportDir = getTestReportDir(buildInfo, resolvedPath);
       const report = parseTestReports(reportDir);
 
       const sections: string[] = [];
