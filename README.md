@@ -7,13 +7,26 @@ An MCP (Model Context Protocol) server that compiles and runs Java projects (Mav
 | Tool | Description |
 |---|---|
 | `compile` | Compile a Maven or Gradle project |
-| `run_test` | Run a specific test/runner class |
+| `run_test` | Run a specific test/runner class and get a compact debug summary |
+| `get_full_report` | Deep-dive fallback: full scenario logs or full build output |
 | `run_main_class` | Execute a class with a `main()` method |
 | `run_feature` | Run a Cucumber feature file by path and tags |
 | `list_runners` | Discover JUnit/Cucumber runner classes |
 | `list_test_classes` | Find test classes by glob pattern |
 | `get_test_results` | Parse Surefire/Gradle XML reports into structured JSON |
 | `get_build_info` | Read project metadata from pom.xml or build.gradle |
+
+## Recommended Agent Workflow
+
+```
+1. compile          -- verify the project builds cleanly
+2. run_test         -- execute the test; get a compact summary with
+                       pass/fail per scenario and capped failure output
+3. get_full_report  -- if the compact summary isn't enough:
+      source=scenario   -> full uncapped Cucumber step log for a scenario
+      source=build_log  -> full Maven/Gradle console output
+4. Fix the code, then go back to step 1.
+```
 
 ## Installation
 
@@ -42,6 +55,21 @@ No installation needed. Add to your Cursor MCP configuration:
     "java-test-runner": {
       "command": "npx",
       "args": ["-y", "java-test-runner-mcp"]
+    }
+  }
+}
+```
+
+### Local development server
+
+If you've cloned and built this repo locally, point directly to the built entry point:
+
+```json
+{
+  "mcpServers": {
+    "java-test-runner": {
+      "command": "node",
+      "args": ["C:\\Repos\\java-test-runner-mcp\\build\\index.js"]
     }
   }
 }
@@ -78,6 +106,12 @@ Once configured, the AI agent can use these tools automatically. Here are exampl
 **Run a test runner:**
 > "Run the WpandTaskStatusRemapping test runner"
 
+**Debug a failure after run_test gives a compact summary:**
+> "Get the full scenario output for the failed test"
+
+**Get the full Maven build log:**
+> "Show me the full build log from the last run"
+
 **Get test results with metrics:**
 > "Show me the test results with execution times"
 
@@ -99,7 +133,10 @@ Compiles a Maven or Gradle project. Auto-detects the build tool from the project
 
 ### run_test
 
-Runs a specific test or runner class.
+Runs a specific test or runner class. Returns a compact, agent-friendly summary:
+- Pass/fail status per scenario with execution times
+- For **failed** scenarios: the assertion message plus the first 4000 chars of the Cucumber step log (API requests/responses, DataTables, stack traces)
+- The full build output is persisted to `<projectPath>/.java-test-runner/last-run.log` for retrieval via `get_full_report`
 
 | Parameter | Required | Description |
 |---|---|---|
@@ -108,6 +145,50 @@ Runs a specific test or runner class.
 | `javaHome` | No | JAVA_HOME override |
 | `jvmArgs` | No | JVM arguments (e.g. `["-Xmx1g"]`) |
 | `timeout` | No | Timeout in ms (default 300000) |
+
+**Example output:**
+
+```
+=== Run Test: runner.WpandTaskStatusRemapping ===
+Exit code: 1 | Elapsed: 343.0s
+
+--- Test Results ---
+Total: 9 | Passed: 8 | Failed: 1 | Errors: 0 | Skipped: 0 | Time: 316.5s
+
+--- All Scenarios ---
+  [FAIL] Create HM Contract with contract rule (5.59s)
+  [PASS] Create WP1 with ad hoc task (126.82s)
+  [PASS] Create customer order for WP1 (3.53s)
+  ...
+
+--- Failure #1: Create HM Contract with contract rule [5.59s] ---
+java.lang.AssertionError: Create contract rule failed with status 500
+
+Scenario output:
+@api @PreRequisite
+Scenario: Create HM Contract with contract rule  # feature:9
+  Given User creates HM contract ...
+    | Company | ContractId | ...
+  {"error":{"code":"DB_OBJECT_EXIST","message":"Resource already in use."}}
+```
+
+### get_full_report
+
+Deep-dive fallback when the compact `run_test` summary is insufficient to diagnose a failure. Supports two modes:
+
+| Parameter | Required | Description |
+|---|---|---|
+| `projectPath` | Yes | Absolute path to project root |
+| `source` | No | `"scenario"` (default) or `"build_log"` |
+| `scenarioName` | No | Scenario name substring to match (case-insensitive). If omitted with `source=scenario`, returns all failed/errored scenarios. |
+| `maxLines` | No | Max lines for build_log mode (default 500, 0 = unlimited) |
+
+**source=scenario** -- Returns the full, uncapped `<system-out>` from Surefire XML for matching scenarios. Contains the complete Cucumber step log including API request/response JSON, DataTables, and full stack traces.
+
+- With `scenarioName`: fuzzy substring match returns output for any matching scenario (even passing ones).
+- Without `scenarioName`: returns all failed/errored scenarios.
+
+**source=build_log** -- Returns the full Maven/Gradle console output from the most recent `run_test` execution (saved to `.java-test-runner/last-run.log`). Useful for diagnosing compilation errors, dependency issues, or plugin failures.
 
 ### run_main_class
 
