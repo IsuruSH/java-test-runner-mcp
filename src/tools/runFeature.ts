@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { detectBuildTool, getRunFeatureCommand } from "../utils/buildTool.js";
 import { execute, formatResultCompact } from "../utils/executor.js";
-import { resolveProjectPath, resolveJavaHome, resolveTimeout } from "../utils/env.js";
+import { resolveJavaHome } from "../utils/env.js";
+import { sep } from "node:path";
 
 export function registerRunFeatureTool(server: McpServer): void {
   server.registerTool(
@@ -12,10 +13,7 @@ export function registerRunFeatureTool(server: McpServer): void {
       description:
         "Run a Cucumber feature file by path and optional tag filter. Returns stdout/stderr, exit code, and elapsed time.",
       inputSchema: {
-        projectPath: z
-          .string()
-          .optional()
-          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
+        projectPath: z.string().describe("Absolute path to the Java project root"),
         featurePath: z
           .string()
           .describe("Feature file path relative to project root (e.g. src/test/resources/myFeature/MyFeature.feature)"),
@@ -34,25 +32,22 @@ export function registerRunFeatureTool(server: McpServer): void {
       },
     },
     async ({ projectPath, featurePath, tags, javaHome, timeout }) => {
-      const resolvedPath = resolveProjectPath(projectPath);
-      if (!resolvedPath) {
-        return {
-          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
-          isError: true,
-        };
-      }
-
-      const buildInfo = detectBuildTool(resolvedPath);
+      const buildInfo = detectBuildTool(projectPath);
       const command = getRunFeatureCommand(buildInfo, featurePath, tags);
 
       const env: Record<string, string> = {};
       const resolvedJavaHome = resolveJavaHome(javaHome);
-      if (resolvedJavaHome) env["JAVA_HOME"] = resolvedJavaHome;
+      if (resolvedJavaHome) {
+        env["JAVA_HOME"] = resolvedJavaHome;
+        const pathSeparator = process.platform === "win32" ? ";" : ":";
+        const javaBin = `${resolvedJavaHome}${sep}bin`;
+        env["PATH"] = `${javaBin}${pathSeparator}${process.env.PATH || ""}`;
+      }
 
       const result = await execute(command, {
-        cwd: resolvedPath,
+        cwd: projectPath,
         env,
-        timeoutMs: resolveTimeout(timeout),
+        timeoutMs: timeout,
       });
       const text = formatResultCompact(result, `Feature: ${featurePath}`, 80);
 

@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { detectBuildTool, getCompileCommand } from "../utils/buildTool.js";
-import { execute, formatResultCompact } from "../utils/executor.js";
+import { execute, formatResult } from "../utils/executor.js";
 import { resolveProjectPath, resolveJavaHome, resolveTimeout, resolveMavenProfiles } from "../utils/env.js";
+import { sep } from "node:path";
 
 export function registerCompileTool(server: McpServer): void {
   server.registerTool(
@@ -44,16 +45,28 @@ export function registerCompileTool(server: McpServer): void {
       const command = getCompileCommand(buildInfo, resolvedProfiles);
       if (args) command.push(...args);
 
+      // Remove the quiet flag if it's there so we get the errors
+      const qIndex = command.indexOf("-q");
+      if (qIndex > -1) {
+        command.splice(qIndex, 1);
+      }
+
       const env: Record<string, string> = {};
       const resolvedJavaHome = resolveJavaHome(javaHome);
-      if (resolvedJavaHome) env["JAVA_HOME"] = resolvedJavaHome;
+      if (resolvedJavaHome) {
+        env["JAVA_HOME"] = resolvedJavaHome;
+        // Prepend JAVA_HOME/bin to PATH so that system calls use the right java/javac
+        const pathSeparator = process.platform === "win32" ? ";" : ":";
+        const javaBin = `${resolvedJavaHome}${sep}bin`;
+        env["PATH"] = `${javaBin}${pathSeparator}${process.env.PATH || ""}`;
+      }
 
       const result = await execute(command, {
         cwd: resolvedPath,
         env,
         timeoutMs: resolveTimeout(),
       });
-      const text = formatResultCompact(result, `Compile (${buildInfo.type})`, 40);
+      const text = formatResult(result, `Compile (${buildInfo.type})`);
 
       return {
         content: [{ type: "text" as const, text }],

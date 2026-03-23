@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { detectBuildTool, getTestCommand, getTestReportDir } from "../utils/buildTool.js";
 import { execute, formatResultCompact } from "../utils/executor.js";
 import { parseTestReports } from "../utils/xmlParser.js";
-import { resolveProjectPath, resolveJavaHome, resolveTimeout } from "../utils/env.js";
+import { resolveJavaHome } from "../utils/env.js";
 
 export function registerRunTestTool(server: McpServer): void {
   server.registerTool(
@@ -15,10 +15,7 @@ export function registerRunTestTool(server: McpServer): void {
       description:
         "Run a specific test or runner class in a Maven/Gradle project. Returns a structured summary with test results. For failed tests, includes the full scenario output (API responses, DataTables, stack traces) so the agent can debug without reading external files.",
       inputSchema: {
-        projectPath: z
-          .string()
-          .optional()
-          .describe("Absolute path to the Java project root (falls back to PROJECT_PATH env var)"),
+        projectPath: z.string().describe("Absolute path to the Java project root"),
         testClass: z
           .string()
           .describe("Fully qualified class name (e.g. runner.WpandTaskStatusRemapping)"),
@@ -37,28 +34,25 @@ export function registerRunTestTool(server: McpServer): void {
       },
     },
     async ({ projectPath, testClass, javaHome, jvmArgs, timeout }) => {
-      const resolvedPath = resolveProjectPath(projectPath);
-      if (!resolvedPath) {
-        return {
-          content: [{ type: "text" as const, text: "Error: projectPath is required. Provide it as a parameter or set PROJECT_PATH env var." }],
-          isError: true,
-        };
-      }
-
-      const buildInfo = detectBuildTool(resolvedPath);
+      const buildInfo = detectBuildTool(projectPath);
       const command = getTestCommand(buildInfo, testClass, jvmArgs);
 
       const env: Record<string, string> = {};
       const resolvedJavaHome = resolveJavaHome(javaHome);
-      if (resolvedJavaHome) env["JAVA_HOME"] = resolvedJavaHome;
+      if (resolvedJavaHome) {
+        env["JAVA_HOME"] = resolvedJavaHome;
+        const pathSeparator = process.platform === "win32" ? ";" : ":";
+        const javaBin = `${resolvedJavaHome}${sep}bin`;
+        env["PATH"] = `${javaBin}${pathSeparator}${process.env.PATH || ""}`;
+      }
 
       const result = await execute(command, {
-        cwd: resolvedPath,
+        cwd: projectPath,
         env,
-        timeoutMs: resolveTimeout(timeout),
+        timeoutMs: timeout,
       });
 
-      const logDir = join(resolvedPath, ".java-test-runner");
+      const logDir = join(projectPath, ".java-test-runner");
       mkdirSync(logDir, { recursive: true });
       writeFileSync(
         join(logDir, "last-run.log"),
@@ -66,7 +60,7 @@ export function registerRunTestTool(server: McpServer): void {
         "utf-8",
       );
 
-      const reportDir = getTestReportDir(buildInfo, resolvedPath);
+      const reportDir = getTestReportDir(buildInfo, projectPath);
       const report = parseTestReports(reportDir);
 
       const sections: string[] = [];
@@ -132,3 +126,4 @@ export function registerRunTestTool(server: McpServer): void {
     },
   );
 }
+
